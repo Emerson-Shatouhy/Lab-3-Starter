@@ -1,0 +1,25 @@
+1. How was the camera preview implemented?
+The camera preview is implemented using the CameraX library from Android Jetpack.
+CameraX handles opening the camera, getting frames, and displaying the live preview inside a PreviewView.
+In the code, there’s usually a CameraX setup step that:
+Sets up a Preview use case to show the camera feed in real time.
+Sets up an ImageAnalysis use case, which lets the app process frames one by one in the background for running inference.
+
+2. How was the model-switching feature (bottom sheet settings) implemented?
+Changing the model is handled by showing a BottomSheetDialogFragment where the user can pick settings.
+When the user selects a different model, the app loads the new model dynamically without restarting the app.
+Behind the scenes, when a new model is selected:
+The ImageClassifierHelper class  is reinitialized with the new model path.
+Any new frames analyzed after that will use the newly loaded model for inference.
+
+3. How did this app specify which deep learning models are included in the APK, and where are they stored?
+The models are placed under the assets/ directory of the project.
+In the build.gradle file for the app module, assets are automatically bundled into the APK.
+When the app starts or switches models, it loads the model from the assets folder using a FileDescriptor or AssetFileDescriptor.
+
+4.  What is the data and control flow to run inference on each camera frame and display the
+result on the bottom sheet?
+CameraX `ImageAnalysis` captures frames and sends them to `ImageAnalyzer`.
+`ImageAnalyzer` preprocesses frames into Tensor format.
+Inference is run using LiteRT model instance.
+Postprocessed results are sent to the UI to display predictions on the bottom sheet.
