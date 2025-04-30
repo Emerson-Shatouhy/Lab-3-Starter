@@ -33,6 +33,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.BottomSheetScaffold
 import androidx.compose.material.Button
 import androidx.compose.material.DropdownMenu
@@ -40,6 +42,7 @@ import androidx.compose.material.DropdownMenuItem
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.Icon
 import androidx.compose.material.MaterialTheme
+import androidx.compose.material.OutlinedTextField
 import androidx.compose.material.RadioButton
 import androidx.compose.material.RadioButtonDefaults
 import androidx.compose.material.Text
@@ -59,6 +62,7 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -88,15 +92,26 @@ class MainActivity : ComponentActivity() {
             ApplicationTheme {
                 BottomSheetScaffold(sheetPeekHeight = (90 + 20 * uiState.categories.size).dp,
                     sheetContent = {
-                        BottomSheet(uiState = uiState, onModelSelected = {
-                            viewModel.setModel(it)
-                        }, onDelegateSelected = {
-                            viewModel.setDelegate(it)
-                        }, onThresholdSet = {
-                            viewModel.setThreshold(it)
-                        }, onMaxResultSet = {
-                            viewModel.setNumberOfResult(it)
-                        })
+                        BottomSheet(uiState = uiState,
+                            onModelSelected = {
+                                viewModel.setModel(it)
+                            },
+                            onDelegateSelected = {
+                                viewModel.setDelegate(it)
+                            },
+                            onThresholdSet = {
+                                viewModel.setThreshold(it)
+                            },
+                            onMaxResultSet = {
+                                viewModel.setNumberOfResult(it)
+                            },
+                            onInferenceModeSelected = {
+                                viewModel.setInferenceMode(it)
+                            },
+                            onServerUrlChanged = {
+                                viewModel.setServerUrl(it)
+                            }
+                        )
                     }) {
                     Column {
                         Header()
@@ -119,7 +134,6 @@ class MainActivity : ComponentActivity() {
             title = {
                 Image(
                     modifier = Modifier.size(120.dp),
-//                    alignment = Alignment.CenterStart,
                     painter = painterResource(id = R.drawable.logo),
                     contentDescription = null,
                 )
@@ -135,11 +149,16 @@ class MainActivity : ComponentActivity() {
         onDelegateSelected: (ImageClassificationHelper.Delegate) -> Unit,
         onThresholdSet: (value: Float) -> Unit,
         onMaxResultSet: (value: Int) -> Unit,
+        onInferenceModeSelected: (mode: InferenceMode) -> Unit,
+        onServerUrlChanged: (url: String) -> Unit
     ) {
         val categories = uiState.categories
         val inferenceTime = uiState.inferenceTime
         val threshold = uiState.setting.threshold
         val resultCount = uiState.setting.resultCount
+        val inferenceMode = uiState.setting.inferenceMode
+        val serverUrl = uiState.setting.serverUrl
+
         Column(
             modifier = modifier.padding(horizontal = 20.dp, vertical = 5.dp)
         ) {
@@ -180,19 +199,48 @@ class MainActivity : ComponentActivity() {
                 )
                 Text(text = stringResource(id = R.string.inference_value, inferenceTime))
             }
+
             Spacer(modifier = Modifier.height(20.dp))
-            ModelSelection(onModelSelected = {
-                onModelSelected(it)
-            })
+
+            // Inference Mode Selection
+            InferenceModeSelection(
+                currentMode = inferenceMode,
+                onModeSelected = onInferenceModeSelected
+            )
+
             Spacer(modifier = Modifier.height(20.dp))
-            OptionMenu(label = stringResource(id = R.string.delegate),
-                options = ImageClassificationHelper.Delegate.entries.map { it.name }) {
-                onDelegateSelected(ImageClassificationHelper.Delegate.valueOf(it))
+
+            // Show device-specific settings or cloud-specific settings based on mode
+            when (inferenceMode) {
+                InferenceMode.DEVICE -> {
+                    // Model selection (only for on-device)
+                    ModelSelection(onModelSelected = onModelSelected)
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Delegate selection (only for on-device)
+                    OptionMenu(
+                        label = stringResource(id = R.string.delegate),
+                        options = ImageClassificationHelper.Delegate.entries.map { it.name }
+                    ) {
+                        onDelegateSelected(ImageClassificationHelper.Delegate.valueOf(it))
+                    }
+                }
+                InferenceMode.CLOUD -> {
+                    // Server URL input for cloud mode
+                    ServerUrlInput(
+                        serverUrl = serverUrl,
+                        onServerUrlChanged = onServerUrlChanged
+                    )
+                }
             }
+
             Spacer(modifier = Modifier.height(10.dp))
+
+            // Common settings for both modes
             AdjustItem(
                 name = stringResource(id = R.string.threshold),
-                value = uiState.setting.threshold,
+                value = threshold,
                 onMinusClicked = {
                     if (threshold > 0.3f) {
                         val newThreshold = (threshold - 0.1f).coerceAtLeast(0.3f)
@@ -208,7 +256,8 @@ class MainActivity : ComponentActivity() {
             )
 
             AdjustItem(
-                name = stringResource(id = R.string.maxResult), value = resultCount,
+                name = stringResource(id = R.string.maxResult),
+                value = resultCount,
                 onMinusClicked = {
                     if (resultCount >= 2) {
                         val count = resultCount - 1
@@ -221,6 +270,88 @@ class MainActivity : ComponentActivity() {
                         onMaxResultSet(count)
                     }
                 },
+            )
+        }
+    }
+
+    @Composable
+    fun InferenceModeSelection(
+        currentMode: InferenceMode,
+        onModeSelected: (InferenceMode) -> Unit
+    ) {
+        val modes = InferenceMode.entries.toList()
+        var selectedMode by remember { mutableStateOf(currentMode) }
+
+        Column {
+            Text(
+                text = "Inference Mode",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colors.primary),
+                    selected = (selectedMode == InferenceMode.DEVICE),
+                    onClick = {
+                        selectedMode = InferenceMode.DEVICE
+                        onModeSelected(InferenceMode.DEVICE)
+                    }
+                )
+                Text(
+                    modifier = Modifier.padding(start = 8.dp),
+                    text = "On-Device",
+                    fontSize = 15.sp
+                )
+
+                Spacer(modifier = Modifier.width(16.dp))
+
+                RadioButton(
+                    colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colors.primary),
+                    selected = (selectedMode == InferenceMode.CLOUD),
+                    onClick = {
+                        selectedMode = InferenceMode.CLOUD
+                        onModeSelected(InferenceMode.CLOUD)
+                    }
+                )
+                Text(
+                    modifier = Modifier.padding(start = 8.dp),
+                    text = "Cloud",
+                    fontSize = 15.sp
+                )
+            }
+        }
+    }
+
+    @Composable
+    fun ServerUrlInput(
+        serverUrl: String,
+        onServerUrlChanged: (String) -> Unit
+    ) {
+        var url by remember { mutableStateOf(serverUrl) }
+
+        Column {
+            Text(
+                text = "Server URL",
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            OutlinedTextField(
+                value = url,
+                onValueChange = {
+                    url = it
+                    onServerUrlChanged(it)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(
+                    onDone = { defaultKeyboardAction(ImeAction.Done) }
+                ),
+                singleLine = true
             )
         }
     }
